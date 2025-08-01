@@ -1,6 +1,6 @@
 
 function functionToTransferStudents() {
-  transferStudentToNewClass("DEA/25/0187", "Nursery-C", "Nursery-A");
+  transferStudentToNewClass("DEA/25/0041", "Nursery-A", "Nursery-C");
 }
 
 function transferStudentToNewClass(regId, fromClass, toClass) {
@@ -108,8 +108,22 @@ function transferStudentToNewClass(regId, fromClass, toClass) {
     const range = toLog.getRange(toRowIndex, col);
     range.setValue(value);
     range.insertCheckboxes();
+
+    // ✅ Add coloring
+    if (value === true) {
+      cell.setBackground("#d9ead3"); // Green
+    } else if (value === false) {
+      cell.setBackground("#f4cccc"); // Red
+    } else {
+      cell.setBackground(null); // Reset if not a boolean
+    }
   }
 
   Logger.log(`✅ Attendance history moved to ${toClass} log with checkboxes.`);
   Logger.log(`🎯 Transfer complete for ${regId} (${studentName}) from ${fromClass} ➡️ ${toClass}`);
-}
+
+  }
+
+
+
+
