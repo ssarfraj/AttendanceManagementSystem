@@ -1,139 +1,256 @@
-function processAttendanceForAllClasses() {
-  const attendanceLogFile = DriveApp.getFilesByName("AttendanceLog");
-  const masterDataFile = DriveApp.getFilesByName("MasterData");
 
-  if (!attendanceLogFile.hasNext() || !masterDataFile.hasNext()) {
-    Logger.log("❌ AttendanceLog or MasterData file not found.");
+//Working Script Don't Delete
+function processAttendanceForClass_0_10()  { processAttendanceForAllClassesInBatches(0, 10); }
+function processAttendanceForClass_10_20() { processAttendanceForAllClassesInBatches(10, 10); }
+function processAttendanceForClass_20_30() { processAttendanceForAllClassesInBatches(20, 10); }
+function processAttendanceForClass_30_40() { processAttendanceForAllClassesInBatches(30, 10); }
+function processAttendanceForClass_40_50() { processAttendanceForAllClassesInBatches(40, 10); }
+
+function processAttendanceForAllClassesInBatches(startIndex = 0, batchSize = 10) {
+  const masterFiles = DriveApp.getFilesByName("MasterData");
+  if (!masterFiles.hasNext()) {
+    Logger.log("❌ MasterData file not found by name.");
     return;
   }
-  else
-  {
-    Logger.log("@SDKLogs::AttendanceLog & MasterData file found.");
+
+  const masterFile = masterFiles.next();
+  Logger.log("✅ MasterData file found: " + masterFile.getName());
+
+  const masterData = SpreadsheetApp.open(masterFile);
+  const classDetailsSheet = masterData.getSheetByName("ClassDetails");
+
+  if (!classDetailsSheet) {
+    Logger.log("❌ ClassDetails sheet not found in MasterData.");
+    return;
   }
 
-  const attendanceLog = SpreadsheetApp.open(attendanceLogFile.next());
-  const masterData = SpreadsheetApp.open(masterDataFile.next());
+  Logger.log("✅ ClassDetails sheet found. Proceeding with class: " + startIndex);
 
-  const classDetailsSheet = masterData.getSheetByName("ClassDetails");
-  const data = classDetailsSheet.getDataRange().getValues();
-  const headers = data[0];
-
-  const classNameIndex = headers.indexOf("Class");
+  const headers = classDetailsSheet.getRange(1, 1, 1, classDetailsSheet.getLastColumn()).getValues()[0];
   const formIdIndex = headers.indexOf("FormID");
   const responseSheetIdIndex = headers.indexOf("ResponseSheetID");
+  const classNameIndex = 0;
 
-  if (classNameIndex === -1 || formIdIndex === -1 || responseSheetIdIndex === -1) 
-  {
-    Logger.log("❌ Required columns missing in ClassDetails.");
-    return;
-  }
-  else
-  {
-    Logger.log("Required columns are found in ClassDetails.");
-    Logger.log(`@SDKLogs: responseSheetIdIndex: ${responseSheetIdIndex}`);
-  }
+  const totalRows = classDetailsSheet.getLastRow() - 1;
+  const classData = classDetailsSheet.getRange(2 + startIndex, 1, Math.min(batchSize, totalRows - startIndex), headers.length).getValues();
 
-  data.slice(1).forEach((row) => {
+  const attendanceLogFile = DriveApp.getFilesByName("AttendanceLog").next();
+  const logBook = SpreadsheetApp.open(attendanceLogFile);
+
+  classData.forEach((row, index) => {
     const className = row[classNameIndex];
     const responseSheetId = row[responseSheetIdIndex];
 
-    if (!className || !responseSheetId) 
-    {
-      Logger.log(`className: ${className} or  responseSheetId : ${responseSheetId} is not found `);
+    if (!className || !responseSheetId) {
+      Logger.log(`⚠️ Skipping class (index ${startIndex + index}) due to missing className or responseSheetId`);
       return;
     }
-    else
-    {
-      Logger.log(`className: ${className} and  responseSheetId : ${responseSheetId} is found `);
+
+    let responseSheet;
+    try {
+      responseSheet = SpreadsheetApp.openById(responseSheetId);
+    } catch (e) {
+      Logger.log(`❌ Could not open response sheet for ${className}: ${e.message}`);
+      return;
     }
-   
+
+    const formResponses = responseSheet.getDataRange().getValues();
+    if (formResponses.length <= 1) {
+      Logger.log(`⚠️ No form responses found for ${className}, skipping processing.`);
+      return;
+    }
+
+    Logger.log(`🔄 Processing attendance for class: ${className} (responses found: ${formResponses.length - 1})`);
 
     try {
-      const responseSheet = SpreadsheetApp.openById(responseSheetId).getSheets()[0];
-      const responses = responseSheet.getDataRange().getValues();
-      if (responses.length < 2) return;
-
-      const responseHeaders = responses[0];
-      const lastResponse = responses[responses.length - 1];
-
-      const dateIndex = responseHeaders.indexOf("Select Attendance Date");
-      const presentIndex = responseHeaders.indexOf("Mark students who are present");
-      if (dateIndex === -1 || presentIndex === -1) {
-        Logger.log(`❌ Required fields missing in form response for ${className}`);
-        return;
-      }
-
-      const selectedDate = Utilities.formatDate(new Date(lastResponse[dateIndex]), Session.getScriptTimeZone(), "yyyy-MM-dd");
-
-      const presentRaw = lastResponse[presentIndex];
-      const presentEntries = typeof presentRaw === 'string'
-        ? presentRaw.split(',').map(s => s.trim())
-        : presentRaw;
-
-      // 🟡 Extract RegIds from "DEA/24/0003 (Name)"
-      const presentRegIds = presentEntries.map(entry => {
-        const match = entry.match(/^([^(]+?)\s*\(/); // Extracts everything before " ("
-        return match ? match[1].trim() : null;
-      }).filter(Boolean);
-
-      Logger.log(`Present Ids After Extraction : ${presentRegIds}`);
-      const classSheet = masterData.getSheetByName(className);
-      if (!classSheet) {
-        Logger.log('@SDKLogs :classSheet Not Found ');
-        return;
-      }
-
-
-      const rawData = classSheet.getRange(2, 1, classSheet.getLastRow() - 1, 2).getValues(); // [RegId, Name]
-      const studentData = rawData.map(([regId, name]) => [regId.trim(), name.trim()]);
- 
-
-
-      let logSheet = attendanceLog.getSheetByName(className);
-      if (!logSheet) {
-        logSheet = attendanceLog.insertSheet(className);
-        logSheet.appendRow(["Student Name", "RegId"]);
-
-        studentData.forEach(([regId, name]) => {          
-          logSheet.appendRow([regId, name]);
-        });
-      }
-
-      const headerRow = logSheet.getRange(1, 1, 1, logSheet.getLastColumn()).getValues()[0];
-      let dateColIndex = headerRow.findIndex(h => {
-        try {
-          return Utilities.formatDate(new Date(h), Session.getScriptTimeZone(), "yyyy-MM-dd") === selectedDate;
-        }
-        catch (e) {
-          return false;
-        }
-      });
-
-      if (dateColIndex === -1) {
-        dateColIndex = headerRow.length;
-        logSheet.getRange(1, dateColIndex + 1).setValue(selectedDate);
-      }
-
-      const sheetRegIds = logSheet.getRange(2, 1, logSheet.getLastRow() - 1).getValues().flat(); // RegId column
-      const regIdRowMap = {};
-      sheetRegIds.forEach((regId, i) => {
-        regIdRowMap[regId.trim()] = i + 2;
-      });
-
-      const checkboxRange = logSheet.getRange(2, dateColIndex + 1, sheetRegIds.length);
-      checkboxRange.insertCheckboxes();
-      checkboxRange.setValue(false); // Mark all absent by default
-
-      presentRegIds.forEach(regId => {
-        const row = regIdRowMap[regId];
-        if (row) {
-          logSheet.getRange(row, dateColIndex + 1).setValue(true); // Mark present
-        }
-      });
-
-      Logger.log(`✅ Attendance updated for ${className} on ${selectedDate}`);
+      processAttendanceForSingleClass(className, masterData, logBook);
+      Logger.log(`✅ Finished processing for ${className}`);
     } catch (err) {
-      Logger.log(`❌ Error processing ${className}: ${err.message}`);
+      Logger.log(`❌ Error processing class ${className}: ${err.message}`);
     }
   });
 }
+
+
+
+function processAttendanceForSingleClass(className, masterData, logBook) {
+  Logger.log(`@@SDK::Inside function processAttendanceForSingleClass`);
+
+  try {
+    const classDetailsSheet = masterData.getSheetByName("ClassDetails");
+    const headers = classDetailsSheet.getRange(1, 1, 1, classDetailsSheet.getLastColumn()).getValues()[0];
+    const classNames = classDetailsSheet.getRange(2, 1, classDetailsSheet.getLastRow() - 1, 1).getValues().flat();
+    const classRowIndex = classNames.findIndex(name => name === className);
+    if (classRowIndex === -1) {
+      Logger.log(`❌ Class ${className} not found in ClassDetails.`);
+      return;
+    }
+
+    Logger.log(`@@SDK::processing for className : ${className}`);
+    const responseSheetId = classDetailsSheet.getRange(classRowIndex + 2, headers.indexOf("ResponseSheetID") + 1).getValue();
+
+    if (!responseSheetId) {
+      Logger.log(`⚠️ Skipping ${className} – No ResponseSheetID found.`);
+      return;
+    }
+
+    const responseSheet = SpreadsheetApp.openById(responseSheetId);
+    const formResponses = responseSheet.getDataRange().getValues();
+
+    if (formResponses.length < 2) {
+      Logger.log(`⚠️ Skipping ${className} – No actual responses.`);
+      return;
+    }
+
+    const formHeader = formResponses[0];
+    const dateColIndex = formHeader.findIndex(h => typeof h === "string" && h.toLowerCase().includes("attendance date"));
+    const presentColIndex = formHeader.findIndex(h => typeof h === "string" && h.toLowerCase().includes("mark students"));
+
+    if (dateColIndex === -1 || presentColIndex === -1) {
+      Logger.log(`⚠️ Required columns not found for ${className}. Header: ${JSON.stringify(formHeader)}`);
+      return;
+    }
+
+    const studentSheet = masterData.getSheetByName(className);
+    if (!studentSheet) {
+      Logger.log(`❌ Student sheet for class ${className} not found.`);
+      return;
+    }
+
+    const studentData = studentSheet.getRange(2, 1, studentSheet.getLastRow() - 1, 2).getValues(); // RegId, Name
+    const studentMap = {};
+    studentData.forEach(([regId, name]) => {
+      studentMap[regId.trim()] = name.trim();
+    });
+
+    let classLog = logBook.getSheetByName(className);
+    if (!classLog) {
+      classLog = logBook.insertSheet(className);
+      classLog.appendRow(["RegId", "Student Name"]);
+      Logger.log(`📘 Created log sheet for class: ${className}`);
+    }
+
+    const logHeader = classLog.getRange(1, 1, 1, classLog.getLastColumn()).getValues()[0];
+    const regIdIndex = logHeader.indexOf("Student Name");
+    const nameIndex = logHeader.indexOf("RegId");
+
+    if (regIdIndex === -1 || nameIndex === -1) {
+      Logger.log(`❌ Missing required headers in log sheet for ${className}`);
+      return;
+    }
+
+    // ✅ Fix applied here to avoid getRange(0,...) issue
+    let existingRegIds = [];
+    const lastRow = classLog.getLastRow();
+    if (lastRow > 1) {
+      existingRegIds = classLog.getRange(2, regIdIndex + 1, lastRow - 1).getValues().flat();
+    } else {
+      Logger.log(`⚠️ No students yet in log sheet ${className}, will populate from MasterData.`);
+    }
+
+    studentData.forEach(([regId, name]) => {
+      if (!existingRegIds.includes(regId)) {
+        const row = [];
+        row[regIdIndex] = regId;
+        row[nameIndex] = name;
+        classLog.appendRow(row);
+      }
+    });
+
+    // Prepare for attendance
+    const latestPerDate = {};
+    
+    Logger.log(`@SDKLogs:responses.length: ${formResponses.length} `);
+/*
+    for (let i = 1; i < formResponses.length; i++) {
+
+      const response = formResponses[i];
+      const dateRaw = response[dateColIndex];
+      Logger.log(`@SDKLogs:response: ${response}`);
+      Logger.log(`@SDKLogs: dateColIndex :${dateColIndex}`);
+      Logger.log(`@SDKLogs: ${formResponses.length} for attendance date (dateRaw):${dateRaw}`);
+      if (!dateRaw) continue;
+
+      const dateKey = Utilities.formatDate(new Date(dateRaw), Session.getScriptTimeZone(), "yyyy-MM-dd");
+      Logger.log(`📅 @SDKLog::Creating dateKey:${dateKey}`);
+      latestPerDate[dateKey] = response;
+    }
+*/
+
+    const response = formResponses[formResponses.length-1];
+    const dateRaw = response[dateColIndex];
+    const dateKey = Utilities.formatDate(new Date(dateRaw), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    latestPerDate[dateKey] = response;
+
+
+    const totalStudents = classLog.getLastRow() - 1;
+    const currentLogHeader = classLog.getRange(1, 1, 1, classLog.getLastColumn()).getValues()[0];
+    Logger.log(`@SDKLogs::currentLogHeader: ${currentLogHeader}`);
+
+    Object.entries(latestPerDate).forEach(([dateKey, response]) => {
+      Logger.log(`📅 Processing date: ${dateKey}`);
+
+      const presentEntries = response[presentColIndex]?.toString().split(",") || [];
+      const presentRegIds = presentEntries.map(e => {
+        const match = e.match(/\(([^)]+)\)/);
+        return match ? match[1].trim() : null;
+      }).filter(Boolean);
+/*
+      let dateColIndex = currentLogHeader.indexOf(dateKey);
+      Logger.log(`@SDKLog: dateColIndex:-> ${dateColIndex}`);
+      if (dateColIndex === -1) {
+        dateColIndex = classLog.getLastColumn();
+        classLog.getRange(1, dateColIndex + 1).setValue(dateKey);
+        Logger.log(`📌 Added column for ${dateKey}`);
+      } 
+      else 
+      {
+        Logger.log(`↻ Updating existing column for ${dateKey}`);
+      }
+*/
+
+// Normalize current headers to date format only
+const normalizedHeaders = currentLogHeader.map(header => {
+  if (typeof header === 'string' || header instanceof Date) {
+    try {
+      const parsedDate = new Date(header);
+      return Utilities.formatDate(parsedDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+    } catch (e) {
+      return header;
+    }
+  }
+  return header;
+});
+
+let dateColIndex = normalizedHeaders.indexOf(dateKey);
+Logger.log(`@SDKLog: dateColIndex:-> ${dateColIndex}`);
+
+if (dateColIndex === -1) {
+  dateColIndex = classLog.getLastColumn();
+  classLog.getRange(1, dateColIndex + 1).setValue(dateKey);
+  Logger.log(`📌 Added column for ${dateKey}`);
+} else {
+  Logger.log(`↻ Updating existing column for ${dateKey}`);
+}
+
+      const checkboxRange = classLog.getRange(2, dateColIndex + 1, totalStudents);
+      checkboxRange.clearContent().insertCheckboxes();
+
+      for (let r = 2; r <= totalStudents + 1; r++) {
+        const rowRegId = classLog.getRange(r, regIdIndex + 1).getValue();
+        const cell = classLog.getRange(r, dateColIndex + 1);
+        const isPresent = presentRegIds.includes(rowRegId);
+        cell.setValue(isPresent);
+        cell.setBackground(isPresent ? "#c6efce" : "#ffc7ce");
+      }
+    });
+
+    Logger.log(`✅ Attendance processed for class: ${className}`);
+
+  } catch (error) {
+    Logger.log(`❌ Error in processAttendanceForSingleClass (${className}): ${error.message}`);
+  }
+}
+
+
+
