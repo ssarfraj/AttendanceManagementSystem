@@ -1,104 +1,75 @@
-function createOrUpdateFormsForAllClasses() {
-  clearAllFormTriggers(); // ✅ Clear old triggers
+function createForms_0_10()  { createOrUpdateFormsInBatches(0, 10);  }
+function createForms_10_20() { createOrUpdateFormsInBatches(10, 10); }
+function createForms_20_30() { createOrUpdateFormsInBatches(20, 10); }
+function createForms_30_40() { createOrUpdateFormsInBatches(30, 10); }
+function createForms_40_50() { createOrUpdateFormsInBatches(40, 10); }
 
-  const masterSheet = SpreadsheetApp.getActiveSpreadsheet();
-  const classSheet = masterSheet.getSheetByName('ClassDetails');
-  const data = classSheet.getDataRange().getValues();
+function createOrUpdateFormsInBatches(startIndex = 0, batchSize = 10) {
+  const masterFile = DriveApp.getFilesByName("MasterData").next();
+  const masterData = SpreadsheetApp.open(masterFile);
+  const parentFolder = masterFile.getParents().next();
 
-  for (let i = 1; i < data.length; i++) {
-    const className = data[i][0];
-    const timing = data[i][1];
-    const teacherName = data[i][2];
-    const formId = data[i][4];
-    const responseSheetId = data[i][5];
+  const formsFolder = getOrCreateSubFolder(parentFolder, "Forms");
+  const responsesFolder = getOrCreateSubFolder(parentFolder, "ResponseSheets");
 
-    if (!className || !teacherName) continue;
+  const classDetailsSheet = masterData.getSheetByName("ClassDetails");
+  const headers = classDetailsSheet.getRange(1, 1, 1, classDetailsSheet.getLastColumn()).getValues()[0];
+  const classData = classDetailsSheet.getRange(2 + startIndex, 1, Math.min(batchSize, classDetailsSheet.getLastRow() - 1 - startIndex), headers.length).getValues();
 
-    const studentSheet = masterSheet.getSheetByName(className);
-    if (!studentSheet) {
-      Logger.log(`❌ No student sheet found for class: ${className}`);
-      continue;
+  const formLinkIndex = headers.indexOf("FormLinks");
+  const formIdIndex = headers.indexOf("FormID");
+  const responseIdIndex = headers.indexOf("ResponseSheetID");
+
+  classData.forEach((row, idx) => {
+    const classIndex = startIndex + idx;
+    const className = row[0];
+    const timing = row[1];
+    const teacher = row[2];
+    const oldFormId = row[formIdIndex];
+    const responseSheetId = row[responseIdIndex];
+
+    if (!className) return;
+    const studentSheet = masterData.getSheetByName(className);
+    if (!studentSheet) return;
+
+    // Delete old form only
+    if (oldFormId) {
+      try {
+        const oldFormFile = DriveApp.getFileById(oldFormId);
+        oldFormFile.setTrashed(true);
+      } catch (e) {
+        Logger.log(`⚠️ Could not delete old form for ${className}: ${e}`);
+      }
     }
 
-    const studentNames = studentSheet
-      .getRange(2, 1, studentSheet.getLastRow() - 1)
-      .getValues()
-      .flat()
-      .filter(name => name && name.trim() !== "");
+    const studentData = studentSheet.getRange(2, 1, studentSheet.getLastRow() - 1, 2).getValues();
+    const form = FormApp.create(`Attendance For - ${className}`);
+    DriveApp.getFileById(form.getId()).moveTo(formsFolder);
+    form.setDescription(`Class Timing: ${timing}\nTeacher: ${teacher}`);
+    form.addDateItem().setTitle("Select Attendance Date").setRequired(true);
 
-    let form;
-    if (formId) {
+    const choices = studentData.map(([regId, name]) => `${name.trim()} (${regId.trim()})`);
+    form.addCheckboxItem().setTitle("Mark students who are present").setChoiceValues(choices);
+
+    if (responseSheetId) {
       try {
-        form = FormApp.openById(formId);
-        Logger.log(`✅ Opened existing form for ${className}`);
+        form.setDestination(FormApp.DestinationType.SPREADSHEET, responseSheetId);
       } catch (e) {
-        Logger.log(`⚠️ Failed to open form for ${className}. Creating new.`);
-        form = FormApp.create(`Attendance For - ${className}`);
-        classSheet.getRange(i + 1, 5).setValue(form.getId()); // Column E
+        Logger.log(`❌ Failed to link existing response sheet for ${className}: ${e}`);
       }
     } else {
-      form = FormApp.create(`Attendance For - ${className}`);
-      classSheet.getRange(i + 1, 5).setValue(form.getId()); // Column E
-      Logger.log(`🆕 Created new form for ${className}`);
+      const newSheet = SpreadsheetApp.create(`Responses - ${className}`);
+      form.setDestination(FormApp.DestinationType.SPREADSHEET, newSheet.getId());
+      DriveApp.getFileById(newSheet.getId()).moveTo(responsesFolder);
+      classDetailsSheet.getRange(classIndex + 2, responseIdIndex + 1).setValue(newSheet.getId());
     }
 
-    form.setTitle(`Attendance For - ${className}`);
-    form.setDescription(`Timing: ${timing}\nTeacher: ${teacherName}`);
-
-    // ✅ Remove old items
-    form.getItems().forEach(item => form.deleteItem(item));
-
-    // ✅ Add date picker
-    const dateItem = form.addDateItem();
-    dateItem.setTitle("Select Attendance Date").setRequired(true);
-
-    // ✅ Add student checkbox
-    const checkbox = form.addCheckboxItem();
-    checkbox.setTitle("Mark students who are present");
-    checkbox.setChoiceValues(studentNames);
-
-    // ✅ Set response sheet if not set
-    let destinationId;
-    try {
-      destinationId = form.getDestinationId();
-    } catch (e) {
-      Logger.log(`ℹ️ No destination linked for ${className}`);
-    }
-
-    if (!destinationId) {
-      const responseSheet = SpreadsheetApp.create(`Responses_${className}`);
-      form.setDestination(FormApp.DestinationType.SPREADSHEET, responseSheet.getId());
-      Utilities.sleep(3000);
-      destinationId = responseSheet.getId();
-    }
-
-    classSheet.getRange(i + 1, 6).setValue(destinationId); // Column F
-
-    // ✅ Generate prefilled URL with today’s date
-    const formResponse = form.createResponse();
-    const today = new Date();
-    formResponse.withItemResponse(dateItem.createResponse(today));
-    const prefilledUrl = formResponse.toPrefilledUrl();
-    classSheet.getRange(i + 1, 7).setValue(prefilledUrl); // Column G
-
-    // ✅ Attach trigger
-    ScriptApp.newTrigger('processAttendanceForAllClasses')
-      .forForm(form)
-      .onFormSubmit()
-      .create();
-
-    Logger.log(`📌 Trigger attached for ${className}`);
-  }
-
-  Logger.log("🎯 All forms updated successfully with triggers and prefilled dates.");
+    classDetailsSheet.getRange(classIndex + 2, formLinkIndex + 1).setValue(form.getPublishedUrl());
+    classDetailsSheet.getRange(classIndex + 2, formIdIndex + 1).setValue(form.getId());
+  });
 }
 
-function clearAllFormTriggers() {
-  const allTriggers = ScriptApp.getProjectTriggers();
-  allTriggers.forEach(trigger => {
-    if (trigger.getHandlerFunction() === 'processAttendanceForAllClasses') {
-      ScriptApp.deleteTrigger(trigger);
-    }
-  });
-  Logger.log("🧹 Cleared all old form submission triggers.");
+function getOrCreateSubFolder(parent, name) {
+  const folders = parent.getFoldersByName(name);
+  return folders.hasNext() ? folders.next() : parent.createFolder(name);
 }
