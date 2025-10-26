@@ -7,7 +7,7 @@ function processAttendanceForClass_30_40() { processAttendanceForAllClassesInBat
 function processAttendanceForClass_40_50() { processAttendanceForAllClassesInBatches(40, 10); }
 
 function processAttendanceForAllClassesInBatches(startIndex = 0, batchSize = 10) {
-  const masterFiles = DriveApp.getFilesByName("MasterData");
+  const masterFiles = DriveApp.getFilesByName("Test_MasterData");
   if (!masterFiles.hasNext()) {
     Logger.log("❌ MasterData file not found by name.");
     return;
@@ -34,7 +34,7 @@ function processAttendanceForAllClassesInBatches(startIndex = 0, batchSize = 10)
   const totalRows = classDetailsSheet.getLastRow() - 1;
   const classData = classDetailsSheet.getRange(2 + startIndex, 1, Math.min(batchSize, totalRows - startIndex), headers.length).getValues();
 
-  const attendanceLogFile = DriveApp.getFilesByName("AttendanceLog").next();
+  const attendanceLogFile = DriveApp.getFilesByName("Test_AttendanceLog").next();
   const logBook = SpreadsheetApp.open(attendanceLogFile);
 
   classData.forEach((row, index) => {
@@ -55,10 +55,12 @@ function processAttendanceForAllClassesInBatches(startIndex = 0, batchSize = 10)
     }
 
     const formResponses = responseSheet.getDataRange().getValues();
+    /*
     if (formResponses.length <= 1) {
       Logger.log(`⚠️ No form responses found for ${className}, skipping processing.`);
       return;
     }
+    */
 
     Logger.log(`🔄 Processing attendance for class: ${className} (responses found: ${formResponses.length - 1})`);
 
@@ -96,11 +98,11 @@ function processAttendanceForSingleClass(className, masterData, logBook) {
 
     const responseSheet = SpreadsheetApp.openById(responseSheetId);
     const formResponses = responseSheet.getDataRange().getValues();
-
+    /*
     if (formResponses.length < 2) {
       Logger.log(`⚠️ Skipping ${className} – No actual responses.`);
       return;
-    }
+    }*/
 
     const formHeader = formResponses[0];
     const dateColIndex = formHeader.findIndex(h => typeof h === "string" && h.toLowerCase().includes("attendance date"));
@@ -175,12 +177,32 @@ function processAttendanceForSingleClass(className, masterData, logBook) {
       Logger.log(`📅 @SDKLog::Creating dateKey:${dateKey}`);
       latestPerDate[dateKey] = response;
     }
-*/
+
 
     const response = formResponses[formResponses.length-1];
     const dateRaw = response[dateColIndex];
     const dateKey = Utilities.formatDate(new Date(dateRaw), Session.getScriptTimeZone(), "yyyy-MM-dd");
     latestPerDate[dateKey] = response;
+*/
+
+    //let latestPerDate = {};
+
+    // If we have at least one response, log the last one
+    if (formResponses.length > 1) {
+      const response = formResponses[formResponses.length - 1];
+      const dateRaw = response[dateColIndex];
+      const dateKey = Utilities.formatDate(new Date(dateRaw), Session.getScriptTimeZone(), "yyyy-MM-dd");
+      latestPerDate[dateKey] = response;
+    }
+
+    // Always ensure today's date is logged, even if no responses
+    const todayKey = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "yyyy-MM-dd");
+    const dayOfWeek = new Date().getDay(); // 0 = Sun, 6 = Sat
+
+    if (!latestPerDate[todayKey]) {
+      Logger.log(`📌 No responses for ${className} on ${todayKey}. Marking all absent.`);
+      latestPerDate[todayKey] = [];  // empty response means all absent
+    }
 
 
     const totalStudents = classLog.getLastRow() - 1;
@@ -232,6 +254,10 @@ if (dateColIndex === -1) {
 } else {
   Logger.log(`↻ Updating existing column for ${dateKey}`);
 }
+
+
+
+
 
       const checkboxRange = classLog.getRange(2, dateColIndex + 1, totalStudents);
       checkboxRange.clearContent().insertCheckboxes();
