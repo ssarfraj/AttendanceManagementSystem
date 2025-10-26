@@ -1,10 +1,11 @@
 
 function functionToTransferStudents() {
-  transferStudentToNewClass("DEA/25/0041", "Nursery-A", "Nursery-C");
+  transferStudentToNewClass("DEA/25/0154", "Nursery -B", "Nursery -A");
+
 }
 
 function transferStudentToNewClass(regId, fromClass, toClass) {
-  const masterFiles = DriveApp.getFilesByName("MasterData");
+  const masterFiles = DriveApp.getFilesByName("Test_MasterData");
   if (!masterFiles.hasNext()) {
     Logger.log("❌ MasterData file not found.");
     return;
@@ -51,7 +52,7 @@ function transferStudentToNewClass(regId, fromClass, toClass) {
   fromSheet.deleteRow(studentRow + 1); // +1 because header
 
   // Attendance transfer
-  const attnFiles = DriveApp.getFilesByName("AttendanceLog");
+  const attnFiles = DriveApp.getFilesByName("Test_AttendanceLog");
   if (!attnFiles.hasNext()) {
     Logger.log("❌ AttendanceLog file not found.");
     return;
@@ -102,25 +103,34 @@ function transferStudentToNewClass(regId, fromClass, toClass) {
 
   const colCount = fromLog.getLastColumn();
 
-  // ✅ Copy attendance data and preserve checkboxes
   for (let col = regIdIndex + 2; col <= colCount; col++) {
+    const headerValue = logHeader[col - 1];  // Column header
     const value = fullRow[col - 1];
     const range = toLog.getRange(toRowIndex, col);
-    range.setValue(value);
-    range.insertCheckboxes();
 
-    // ✅ Add coloring
-    if (value === true) {
-      cell.setBackground("#d9ead3"); // Green
-    } else if (value === false) {
-      cell.setBackground("#f4cccc"); // Red
-    } else {
-      cell.setBackground(null); // Reset if not a boolean
+    range.setValue(value);
+
+    // ✅ Only apply checkboxes for date columns, not "RegId" or "Student Name"
+    if (col !== regIdIndex + 1 && col !== nameIndex + 1) {
+      range.insertCheckboxes();
+
+      // ✅ Add coloring for true/false
+      if (value === true) {
+        range.setBackground("#d9ead3"); // Green
+      } else if (value === false) {
+        range.setBackground("#f4cccc"); // Red
+      } else {
+        range.setBackground(null);
+      }
     }
   }
 
   Logger.log(`✅ Attendance history moved to ${toClass} log with checkboxes.`);
   Logger.log(`🎯 Transfer complete for ${regId} (${studentName}) from ${fromClass} ➡️ ${toClass}`);
+
+  fromLog.deleteRow(fromLogRowIndex);
+  Logger.log(`🗑️ Removed student ${regId} from ${fromClass} log.`);
+
 
   }
 
